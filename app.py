@@ -2222,6 +2222,13 @@ CRITICAL CURRENCY RULE:
 - If user says "€1000" → budget_currency_code = "EUR"
 - Never assume a currency — always confirm it.
 
+CRITICAL TRIP TYPE RULE:
+- NEVER ask the user if the trip is domestic or international. Determine it yourself from the cities.
+- If source and destination are in the same country → "domestic"
+- If source and destination are in different countries → "international"
+- Examples: Mumbai→Paris = international, Delhi→Goa = domestic, London→Rome = international
+- Set trip_type automatically and silently — do not mention it to the user.
+
 Guidelines:
 - Be conversational and friendly
 - Ask for ONE missing field at a time
@@ -2307,7 +2314,7 @@ def run_route_agent_fact_gathering(api_key: str, travel_state: dict) -> str:
 
     curr_code   = st.session_state.budget_currency[0]
     curr_symbol = st.session_state.budget_currency[1]
-    budget_amt  = travel_state.get('budget', 0)
+    budget_amt  = st.session_state.get("effective_budget") or travel_state.get('budget', 0) or 0
 
     analysis_prompt = f"""
 You are a Route Planning Agent. Below are the raw results from three transport APIs
@@ -2887,7 +2894,9 @@ if is_complete:
     raw_budget = raw_budget or 0
 
     if trip_type == "international" and home_curr[0] != "USD":
-        eff_budget_usd = eff_budget if eff_budget > 0 else convert_to_usd(raw_budget, home_curr[0])
+        # Always compute USD from raw budget using static rates — never trust eff_budget which may not be set yet
+        eff_budget_usd = convert_to_usd(raw_budget, home_curr[0])
+        rate = _TO_USD_RATES.get(home_curr[0], 1)
         st.markdown(f"""
         <div style="background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.35);
                     border-radius: 10px; padding: 12px 20px; margin-bottom: 20px;">
@@ -2895,7 +2904,7 @@ if is_complete:
             <span style="color:#94a3b8; font-size:0.85rem;">
                 Your budget of <strong style="color:#f1f5f9;">{home_curr[1]}{raw_budget:,.0f} {home_curr[0]}</strong>
                 has been converted to <strong style="color:#818cf8;">${eff_budget_usd:,.0f} USD</strong>
-                for international cost comparisons (approx. rate: 1 {home_curr[0]} = ${_TO_USD_RATES.get(home_curr[0], 1):.4f} USD).
+                for international cost comparisons (approx. rate: 1 {home_curr[0]} = ${rate:.4f} USD).
                 All prices on this page are in <strong style="color:#818cf8;">USD</strong>.
                 Verify exchange rates before booking.
             </span>
@@ -3059,9 +3068,11 @@ if is_complete:
             flight_currency_note = st.session_state.get("flight_currency_note", "")
             if flight_currency_note:
                 st.info(f"💱 {flight_currency_note}")
-            trip_type = st.session_state.travel_state.get("trip_type", "domestic")
+            trip_type    = st.session_state.travel_state.get("trip_type", "domestic")
+            working_curr = st.session_state.budget_currency[0]
+            working_sym  = st.session_state.budget_currency[1]
             if trip_type == "international":
-                st.warning("🌍 International trip detected — all flight prices are shown in **USD** for easy comparison. Convert to your local currency before booking.")
+                st.warning(f"🌍 International trip detected — all prices are shown in **{working_curr}** for easy comparison. Verify with airline before booking.")
             mode_icons = {
                 "drive": "🚗 Driving Option",
                 "train": "🚆 Rail Travel Option",
